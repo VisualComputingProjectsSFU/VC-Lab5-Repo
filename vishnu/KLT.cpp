@@ -98,29 +98,56 @@ using namespace cv;
 
 cv::Matx33d Findfundamental(vector<cv::Point2f> prev_subset,vector<cv::Point2f> next_subset){
     cv::Matx33d F;
-    cv::Mat homo_x_prime(3,1,CV_64FC1);
-    cv::Mat homo_x(3,1,CV_64FC1);
+    cv::Mat homog_x_prime(3,1,CV_64FC1);
+    cv::Mat homog_x(3,1,CV_64FC1);
+    cv::Mat line(1,3,CV_64FC1);
+    cv::Mat normalisation_mat(3,3,CV_64FC1);
     cv::Point2f curr_point;
     cv::Mat A_inter(3,3,CV_64FC1);
-    cv::Mat A(8,9,CV_64FC1);
+    cv::Mat A(prev_subset.size(),9,CV_64FC1);
     cv::Mat AtA(9,9,CV_64FC1);
     cv::Mat fprime_est(3,3,CV_64FC1);
     cv::Mat fprime(3,3,CV_64FC1);
     cv::Mat svdestw = cv::Mat::zeros(3,3,CV_64FC1);
     //fill the blank
+
+    normalisation_mat.at<double>(0,0)=(2.0/640);
+    normalisation_mat.at<double>(0,1)= 0;
+    normalisation_mat.at<double>(0,2)=-1;
+    normalisation_mat.at<double>(1,0)=0;
+    normalisation_mat.at<double>(1,1)=(2.0/480);
+    normalisation_mat.at<double>(1,2)=-1;
+    normalisation_mat.at<double>(2,0)=0;
+    normalisation_mat.at<double>(2,1)=0;
+    normalisation_mat.at<double>(2,2)=1;
+
+    //cout<<"sizeeeeeeeeeeeeeeee"<<prev_subset.size()<<endl;
+
+  
     for (int i=0;i<prev_subset.size();i++)
     {
     	curr_point = next_subset[i];
-    	homo_x_prime.at<double>(0,0)=(curr_point.x-(640.0/2))/(640.0/2);
-    	homo_x_prime.at<double>(1,0)=(curr_point.y-(480.0/2))/(480.0/2);
-    	homo_x_prime.at<double>(2,0)=1; 
+    	homog_x_prime.at<double>(0,0)=curr_point.x;
+    	homog_x_prime.at<double>(1,0)=curr_point.y;
+    	homog_x_prime.at<double>(2,0)=1; 
+
+        //cout<<"Matrix homog_x_prime"<<homog_x_prime<<endl;
 
     	curr_point = prev_subset[i];
-    	homo_x.at<double>(0,0)=(curr_point.x-(640.0/2))/(640.0/2);
-    	homo_x.at<double>(1,0)=(curr_point.y-(480.0/2))/(480.0/2);
-    	homo_x.at<double>(2,0)=1;
+    	homog_x.at<double>(0,0)=curr_point.x;
+    	homog_x.at<double>(1,0)=curr_point.y;
+    	homog_x.at<double>(2,0)=1;
 
-    	A_inter = homo_x_prime*homo_x.t();
+        //cout<<"Matrix homog_x"<<homog_x<<endl;
+
+        homog_x_prime=normalisation_mat*homog_x_prime;
+        homog_x=normalisation_mat*homog_x;
+
+
+        //cout<<"Matrix after norm homog_x_prime"<<homog_x_prime<<endl;
+        //cout<<"Matrix  after norm homog_x"<<homog_x<<endl;
+
+    	A_inter = homog_x_prime*homog_x.t();
 
     	A.at<double>(i,0)=A_inter.at<double>(0,0);
     	A.at<double>(i,1)=A_inter.at<double>(0,1);
@@ -133,53 +160,86 @@ cv::Matx33d Findfundamental(vector<cv::Point2f> prev_subset,vector<cv::Point2f> 
     	A.at<double>(i,8)=A_inter.at<double>(2,2);
 
 
+    //cout<<"iterations"<<i<<endl;
     }
 
-    //cout<<"Matrix A"<<A<<endl;
+    cout<<"Matrix A"<<A.size()<<endl;
+    cv::SVD svd(A);
 
-    AtA=A.t()*A;
+    //cout<<"svd u"<<svd.u<<endl;
+    //cout<<"svd vt"<<svd.vt<<endl;
+    //cout<<"svd w"<<svd.w<<endl;
 
-    cout<<"size of W "<<AtA.size()<<endl;
-
-    cv::SVD svd(AtA);
-
-    cout<<"svd u"<<svd.u<<endl;
-    cout<<"svd vt"<<svd.vt<<endl;
-    cout<<"svd w"<<svd.w<<endl;
-
-    fprime_est.at<double>(0,0)=svd.vt.at<double>(0,8);
-    fprime_est.at<double>(0,1)=svd.vt.at<double>(1,8);
-    fprime_est.at<double>(0,2)=svd.vt.at<double>(2,8);
-    fprime_est.at<double>(1,0)=svd.vt.at<double>(3,8);
-    fprime_est.at<double>(1,1)=svd.vt.at<double>(4,8);
-    fprime_est.at<double>(1,2)=svd.vt.at<double>(5,8);
-    fprime_est.at<double>(2,0)=svd.vt.at<double>(6,8);
-    fprime_est.at<double>(2,1)=svd.vt.at<double>(7,8);
-    fprime_est.at<double>(2,2)=svd.vt.at<double>(8,8);
+    fprime_est.at<double>(0,0)=svd.vt.at<double>(7,0);
+    fprime_est.at<double>(0,1)=svd.vt.at<double>(7,1);
+    fprime_est.at<double>(0,2)=svd.vt.at<double>(7,2);
+    fprime_est.at<double>(1,0)=svd.vt.at<double>(7,3);
+    fprime_est.at<double>(1,1)=svd.vt.at<double>(7,4);
+    fprime_est.at<double>(1,2)=svd.vt.at<double>(7,5);
+    fprime_est.at<double>(2,0)=svd.vt.at<double>(7,6);
+    fprime_est.at<double>(2,1)=svd.vt.at<double>(7,7);
+    fprime_est.at<double>(2,2)=svd.vt.at<double>(7,8);
 
     cv::SVD svdest(fprime_est);
 
-    cout<<"svdest w"<<svdest.w.size()<<endl;
-    cout<<"svdest u"<<svdest.u.size()<<endl;
-    cout<<"svdest vt"<<svdest.vt.size()<<endl;
+    //cout<<"svdest w"<<svdest.w<<endl;
+    //cout<<"svdest u"<<svdest.u<<endl;
+    //cout<<"svdest vt"<<svdest.vt<<endl;
 
     svdestw.at<double>(0,0)=svdest.w.at<double>(0,0);
     svdestw.at<double>(1,1)=svdest.w.at<double>(1,0);
 
     fprime=svdest.u*svdestw*svdest.vt;
 
-    cout<<"prime "<<determinant(fprime)<<endl;
-    cout<<"check "<<homo_x_prime.t()*fprime*homo_x<<endl;
+    //cout<<"prime "<<fprime<<endl;
 
+    fprime = normalisation_mat.t()*fprime*normalisation_mat;
 
+    //cout<<"check "<<homog_x_prime.t()*fprime*homog_x<<endl;
 
+    F= fprime;
 
-
+    //cout<<"Fundamental matrix "<<F<<endl;
+    
     return F;
 }
 bool checkinlier(cv::Point2f prev_keypoint,cv::Point2f next_keypoint,cv::Matx33d Fcandidate,double d){
     //fill the blank
-    return false;
+    cv::Mat homog_x_prime(3,1,CV_64FC1);
+    cv::Mat homog_x(3,1,CV_64FC1);
+    cv::Mat line(1,3,CV_64FC1);
+    cv::Mat Fcand(3,3,CV_64FC1);
+
+    homog_x_prime.at<double>(0,0)=next_keypoint.x;
+    homog_x_prime.at<double>(1,0)=next_keypoint.y;
+    homog_x_prime.at<double>(2,0)=1; 
+
+    //cout<<"Matrix homog_x_prime"<<homog_x_prime<<endl;
+
+    homog_x.at<double>(0,0)=prev_keypoint.x;
+    homog_x.at<double>(1,0)=prev_keypoint.y;
+    homog_x.at<double>(2,0)=1;
+
+    //cout<<"Matrix homog_x"<<homog_x<<endl;
+
+    Fcand = Mat(Fcandidate);
+
+    line=(Fcand.t())*homog_x_prime;
+
+    float a = line.at<double>(0,0);
+    float b = line.at<double>(1,0);
+    float c = line.at<double>(2,0);
+    float u = homog_x.at<double>(0,0);
+    float v = homog_x.at<double>(1,0);
+    float dist = abs(a*u+b*v+c)/sqrt(a*a+b*b);
+    if (dist <= d)
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
 }
 
 int main( int argc, char** argv )
@@ -270,10 +330,12 @@ int main( int argc, char** argv )
             if(checkinlier(prev_keypoints[j],next_keypoints[j],Fcandidate,d))
                 inliers++;
         }
+        cout<<"No of inliers "<< inliers <<endl;
         if(inliers > bestinliers)
         {
             F = Fcandidate;
             bestinliers = inliers;
+            cout<<"Best inliers "<< bestinliers <<endl;
         }
         prev_subset.clear();
         next_subset.clear();
@@ -289,8 +351,9 @@ int main( int argc, char** argv )
         }
 
     }
+    cout<<"Get Best Fundamental matrix is \n"<<endl;
     F = Findfundamental(prev_subset,next_subset);
 
-    cout<<"Fundamental matrix is \n"<<F<<endl;
+    cout<<"Best Fundamental matrix is \n"<<F<<endl;
     return 0;
 }
