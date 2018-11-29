@@ -96,6 +96,23 @@ using namespace std;
 
 using namespace cv;
 
+cv::Mat convert_to_homogenous(cv::Point2f cartesian){
+    cv::Mat homogenous_mat(3,1,CV_64FC1);
+
+    homogenous_mat.at<double>(0,0)=cartesian.x;
+    homogenous_mat.at<double>(1,0)=cartesian.y;
+    homogenous_mat.at<double>(2,0)=1;
+
+    return homogenous_mat;
+}
+
+cv::Mat get_epipolar_lines(cv::Mat point,cv::Mat Fundamental)
+{
+   cv::Mat epipolar_line(1,3,CV_64FC1);
+   epipolar_line=(Fundamental.t())*point;
+   return epipolar_line;
+}
+
 cv::Matx33d Findfundamental(vector<cv::Point2f> prev_subset,vector<cv::Point2f> next_subset){
     cv::Matx33d F;
     cv::Mat homog_x_prime(3,1,CV_64FC1);
@@ -124,22 +141,14 @@ cv::Matx33d Findfundamental(vector<cv::Point2f> prev_subset,vector<cv::Point2f> 
     //cout<<"sizeeeeeeeeeeeeeeee"<<prev_subset.size()<<endl;
 
   
-    for (int i=0;i<prev_subset.size();i++)
+    for (size_t i=0;i<prev_subset.size();i++)
     {
-    	curr_point = next_subset[i];
-    	homog_x_prime.at<double>(0,0)=curr_point.x;
-    	homog_x_prime.at<double>(1,0)=curr_point.y;
-    	homog_x_prime.at<double>(2,0)=1; 
+    	homog_x_prime=convert_to_homogenous(next_subset[i]); 
 
-        //cout<<"Matrix homog_x_prime"<<homog_x_prime<<endl;
+         
+    	homog_x=convert_to_homogenous(prev_subset[i]);
 
-    	curr_point = prev_subset[i];
-    	homog_x.at<double>(0,0)=curr_point.x;
-    	homog_x.at<double>(1,0)=curr_point.y;
-    	homog_x.at<double>(2,0)=1;
-
-        //cout<<"Matrix homog_x"<<homog_x<<endl;
-
+        
         homog_x_prime=normalisation_mat*homog_x_prime;
         homog_x=normalisation_mat*homog_x;
 
@@ -160,7 +169,7 @@ cv::Matx33d Findfundamental(vector<cv::Point2f> prev_subset,vector<cv::Point2f> 
     	A.at<double>(i,8)=A_inter.at<double>(2,2);
 
 
-    //cout<<"iterations"<<i<<endl;
+    // cout<<"iterations"<<i<<endl;
     }
 
     cout<<"Matrix A"<<A.size()<<endl;
@@ -226,12 +235,18 @@ bool checkinlier(cv::Point2f prev_keypoint,cv::Point2f next_keypoint,cv::Matx33d
 
     line=(Fcand.t())*homog_x_prime;
 
+    cout<<"epipolar line"<<line<<endl;
+
     float a = line.at<double>(0,0);
     float b = line.at<double>(1,0);
     float c = line.at<double>(2,0);
     float u = homog_x.at<double>(0,0);
     float v = homog_x.at<double>(1,0);
     float dist = abs(a*u+b*v+c)/sqrt(a*a+b*b);
+    cout<<"dist"<<dist<<endl;
+    cout<<"u"<<u<<endl;
+    cout<<"v"<<v<<endl;
+
     if (dist <= d)
     {
         return true;
@@ -326,8 +341,8 @@ int main( int argc, char** argv )
         Fcandidate = Findfundamental(prev_subset,next_subset);
         // step3: Evaluate inliers, decide if we need to update the best solution
         int inliers = 0;
-        for(size_t j=0;j<prev_keypoints.size();j++){
-            if(checkinlier(prev_keypoints[j],next_keypoints[j],Fcandidate,d))
+        for(size_t j=0;j<kps_prev.size();j++){
+            if(checkinlier(kps_prev[j],kps_next[j],Fcandidate,d))
                 inliers++;
         }
         cout<<"No of inliers "<< inliers <<endl;
@@ -343,7 +358,7 @@ int main( int argc, char** argv )
 
     // step4: After we finish all the iterations, use the inliers of the best model to compute Fundamental matrix again.
 
-    for(size_t j=0;j<prev_keypoints.size();j++){
+    for(size_t j=0;j<kps_prev.size();j++){
         if(checkinlier(kps_prev[j],kps_next[j],F,d))
         {
             prev_subset.push_back(kps_prev[j]);
@@ -355,5 +370,55 @@ int main( int argc, char** argv )
     F = Findfundamental(prev_subset,next_subset);
 
     cout<<"Best Fundamental matrix is \n"<<F<<endl;
+
+    
+
+   //visualize epipolar lines
+   hconcat(img_1,img_2,img_1);
+   for ( size_t i=0; i< next_subset.size() ;i++)
+   {
+       Point pt1;
+       Point pt2;
+       Point pt3;
+
+       cv::Mat next_mat = convert_to_homogenous(next_subset[i]);
+       cv::Mat prev_mat = convert_to_homogenous(prev_subset[i]);
+
+       cv::Mat epipolar_line=get_epipolar_lines(next_mat,Mat(F));
+
+       pt1.x = 0;
+       pt1.y = -epipolar_line.at<double>(0,2)/epipolar_line.at<double>(0,1);
+
+       pt2.x = img_2.cols;
+       pt2.y = -(epipolar_line.at<double>(0,2)+epipolar_line.at<double>(0,0)*img_2.cols)/epipolar_line.at<double>(0,1);
+
+       line(img_1, pt1, pt2, cv::Scalar(0,255,255));
+       circle(img_1, prev_subset[i], 5, cv::Scalar(0, 0, 255), -1);
+
+       epipolar_line=get_epipolar_lines(prev_mat,Mat(F).t());
+       pt1.x = img_2.cols;
+       pt1.y = -epipolar_line.at<double>(0,2)/(epipolar_line.at<double>(0,1));
+
+       pt2.x = img_1.cols;
+       pt2.y = -(epipolar_line.at<double>(0,2)+epipolar_line.at<double>(0,0)*img_2.cols)/epipolar_line.at<double>(0,1);
+
+       pt3.x = next_subset[i].x+img_2.cols;
+       pt3.y = next_subset[i].y;
+
+       line(img_1, pt1, pt2, cv::Scalar(255,255,0));
+       circle(img_1, pt3, 5, cv::Scalar(0, 255, 0), -1);
+
+
+    }
+   
+
+   cv::imshow("klt tracker", img_1);
+   cv::waitKey(0);
+
+
+
+
+
+
     return 0;
 }
