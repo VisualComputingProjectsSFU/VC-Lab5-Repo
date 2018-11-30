@@ -11,6 +11,16 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/features2d/features2d.hpp>
 #include <opencv2/video/tracking.hpp>
+#include <opencv2/calib3d/calib3d.hpp>
+
+cv::Mat convert_to_homogenous(cv::Point2f cartesian)
+{
+    cv::Mat homogenous_mat(3, 1, CV_64FC1);
+    homogenous_mat.at<double>(0, 0) = cartesian.x;
+    homogenous_mat.at<double>(1, 0) = cartesian.y;
+    homogenous_mat.at<double>(2, 0) = 1;
+    return homogenous_mat;
+}
 
 cv::Matx33d findFundamental(
     std::vector<cv::Point2f> prev_subset, std::vector<cv::Point2f> next_subset)
@@ -40,16 +50,8 @@ cv::Matx33d findFundamental(
   
     for (size_t i = 0; i < prev_subset.size(); i++)
     {
-        curr_point = next_subset[i];
-        homog_x_prime.at<double>(0, 0) = curr_point.x;
-        homog_x_prime.at<double>(1, 0) = curr_point.y;
-        homog_x_prime.at<double>(2, 0) = 1; 
-
-        curr_point = prev_subset[i];
-        homog_x.at<double>(0, 0) = curr_point.x;
-        homog_x.at<double>(1, 0) = curr_point.y;
-        homog_x.at<double>(2, 0) = 1;
-
+        homog_x_prime=convert_to_homogenous(next_subset[i]);
+        homog_x=convert_to_homogenous(prev_subset[i]); 
         homog_x_prime = normalisation_mat * homog_x_prime;
         homog_x = normalisation_mat * homog_x;
 
@@ -93,12 +95,8 @@ cv::Matx33d findFundamental(
 }
 
 bool checkInlier(
-    cv::Point2f prev_keypoint,
-    cv::Point2f next_keypoint,
-    cv::Matx33d candidate, 
-    double threshold,
-    cv::Mat &epipolar_line,
-    double &distance)
+    cv::Point2f prev_keypoint, cv::Point2f next_keypoint,
+    cv::Matx33d candidate, double threshold)
 {
     // Convert candidate to cv::Mat.
     cv::Mat candidate_mat = cv::Mat(candidate);
@@ -114,7 +112,7 @@ bool checkInlier(
     next_keypoint_h.at<double>(2, 0) = 1.0;
 
     // Compute epipolar line.
-    epipolar_line = (candidate_mat.t()) * next_keypoint_h;
+    cv::Mat epipolar_line = candidate_mat.t() * next_keypoint_h;
 
     // Compute the distance between the point and the line.
     double a = epipolar_line.at<double>(0, 0);
@@ -122,27 +120,96 @@ bool checkInlier(
     double c = epipolar_line.at<double>(2, 0);
     double u = prev_keypoint_h.at<double>(0, 0);
     double v = prev_keypoint_h.at<double>(1, 0);
-    distance = std::abs(a * u + b * v + c) / std::sqrt(a * a + b * b);
+    double distance = std::abs(a * u + b * v + c) / std::sqrt(a * a + b * b);
 
     return (distance < threshold);
 }
 
-bool checkInlier(
-    cv::Point2f prev_keypoint,
-    cv::Point2f next_keypoint,
-    cv::Matx33d candidate, 
-    double threshold)
+void visulize(
+    std::vector<cv::Point2f> prev_keypoints, 
+    std::vector<cv::Point2f> next_keypoints, 
+    cv::Matx33d f, double threshold,
+    cv::Mat img_out)
 {
-    cv::Mat epipolar_line;
-    double distance;
+    double sum = 0;
+    cv::Mat fundamental = cv::Mat(f);
 
-    return checkInlier(
-        prev_keypoint,
-        next_keypoint,
-        candidate, 
-        threshold,
-        epipolar_line,
-        distance);
+    for (size_t i = 0; i < prev_keypoints.size(); i++) 
+    {
+        cv::Point2f prev_keypoint = prev_keypoints[i];
+        cv::circle(
+            img_out, prev_keypoint, 5, cv::Scalar(0, 0, 255), -1);
+        
+        cv::Point2f next_keypoint = next_keypoints[i];
+        cv::Point2f next_keypoint_shift = next_keypoint;
+        next_keypoint_shift.x += img_out.cols / 2.0;
+        cv::circle(
+            img_out, next_keypoint_shift, 5, cv::Scalar(255, 0, 0), -1);
+
+        // Prepare data.
+        cv::Mat epipolar_line;
+        double a, b, c, u, v, x, y; 
+        cv::Point2f p1, p2; 
+        cv::Mat prev_keypoint_h = cv::Mat(3, 1, CV_64FC1);
+        cv::Mat next_keypoint_h = cv::Mat(3, 1, CV_64FC1);
+        prev_keypoint_h.at<double>(0, 0) = prev_keypoint.x;
+        prev_keypoint_h.at<double>(1, 0) = prev_keypoint.y;
+        prev_keypoint_h.at<double>(2, 0) = 1.0;
+        next_keypoint_h.at<double>(0, 0) = next_keypoint.x;
+        next_keypoint_h.at<double>(1, 0) = next_keypoint.y;
+        next_keypoint_h.at<double>(2, 0) = 1.0;
+
+        // Left Image =======================================================//
+        epipolar_line = fundamental.t() * next_keypoint_h;
+
+        // Compute the distance between the point and the line.
+        a = epipolar_line.at<double>(0, 0);
+        b = epipolar_line.at<double>(1, 0);
+        c = epipolar_line.at<double>(2, 0);
+        u = next_keypoint_h.at<double>(0, 0);
+        v = prev_keypoint_h.at<double>(1, 0);
+        sum += std::abs(a * u + b * v + c) / std::sqrt(a * a + b * b);
+      
+        x = 0;
+        y = -(a * x + c) / b;
+        p1 = cv::Point2f(x, y);
+
+        x = img_out.cols / 2.0;
+        y = -(a * x + c) / b;
+        p2 = cv::Point2f(x, y);
+
+        cv::line(img_out, p1, p2, cv::Scalar(255, 255, 255));
+
+        // Right Image ======================================================//
+        epipolar_line = fundamental * prev_keypoint_h;
+
+        // Compute the distance between the point and the line.
+        a = epipolar_line.at<double>(0, 0);
+        b = epipolar_line.at<double>(1, 0);
+        c = epipolar_line.at<double>(2, 0);
+        u = next_keypoint_h.at<double>(0, 0);
+        v = next_keypoint_h.at<double>(1, 0);
+        sum += std::abs(a * u + b * v + c) / std::sqrt(a * a + b * b);
+      
+        x = 0;
+        y = -(a * x + c) / b;
+        x += img_out.cols / 2.0;
+        p1 = cv::Point2f(x, y);
+
+        x = img_out.cols / 2.0;
+        y = -(a * x + c) / b;
+        x += img_out.cols / 2.0;
+        p2 = cv::Point2f(x, y);
+
+        cv::line(img_out, p1, p2, cv::Scalar(255, 255, 255));
+    }
+
+    sum /= 2.0;
+    cv::imwrite("out.png", img_out);
+    cv::imshow("Visual SLAM", img_out);
+    std::cout << "Average Error: " << sum / prev_keypoints.size() << "\n";
+    std::cout << "Fundamental Matrix: \n" << fundamental << std::endl;
+    cv::waitKey(0);
 }
 
 int main(int argc, char** argv)
@@ -242,7 +309,7 @@ int main(int argc, char** argv)
         for (size_t j = 0; j < kps_prev.size(); j++)
         {
             if (checkInlier(
-                prev_keypoints[j], next_keypoints[j], candidate, d))
+                kps_prev[j], kps_next[j], candidate, d))
                 inliers.push_back(next_keypoints[j]);
         }
         if (inliers.size() > best_inliers.size())
@@ -257,7 +324,7 @@ int main(int argc, char** argv)
 
     // Step 4: After we finish all the iterations, use the inliers of the best
     // model to compute Fundamental matrix again.
-    for (size_t i = 0; i < prev_keypoints.size(); i++)
+    for (size_t i = 0; i < kps_prev.size(); i++)
     {
         if (checkInlier(kps_prev[i], kps_next[i], fundamental, d))
         {
@@ -265,57 +332,15 @@ int main(int argc, char** argv)
             next_subset.push_back(kps_next[i]);
         }
     }
+    std::cout << "Number of Inlier: " << prev_subset.size();
+    std::cout << "/" << prev_keypoints.size() << "\n";
+
     fundamental = findFundamental(prev_subset, next_subset);
+    // std::cout << fundamental << "\n";
+    fundamental = cv::findFundamentalMat(prev_keypoints, next_keypoints, CV_FM_RANSAC ,1.5f, 0.99);
 
-    // Visualize epipolar lines and distances of fundamental & candidate.
-    for (size_t i = 0; i < prev_keypoints.size(); i++) 
-    {
-        cv::Point2f p;
-        p = prev_keypoints[i];
-        cv::circle(
-            img_out, p, 5, cv::Scalar(0, 0, 255), -1);
-        
-        p = next_keypoints[i];
-        p.x += img_1.cols;
-        cv::circle(
-            img_out, p, 5, cv::Scalar(255, 0, 0), -1);
-
-        cv::Mat epipolar_line;
-        double distance;
-
-        // Get epipolar line and distance.
-        checkInlier(
-            prev_keypoints[i],
-            next_keypoints[i],
-            fundamental, 
-            d,
-            epipolar_line,
-            distance);
-
-        // Convert epipolar line and display it.
-        double x, y;
-        double a = epipolar_line.at<double>(0, 0);
-        double b = epipolar_line.at<double>(1, 0);
-        double c = epipolar_line.at<double>(2, 0);
-
-        x = 0;
-        y = -(a * x + c) / b;
-        x += img_1.cols;
-        cv::Point2f p1 = cv::Point2f(x, y);
-
-        x = 640;
-        y = -(a * x + c) / b;
-        x += img_1.cols;
-        cv::Point2f p2 = cv::Point2f(x, y);
-
-        std::cout << distance << "\n";
-        cv::line(img_out, p1, p2, cv::Scalar(255, 255, 255));
-    }
-
-    cv::imwrite("out.png", img_out);
-    cv::imshow("Visual SLAM", img_out);
-    std::cout << "Fundamental Matrix: \n" << fundamental << std::endl;
-    cv::waitKey(0);
+    // Visualize epipolar lines and distances of fundamental & candidate. 
+    visulize(prev_keypoints, next_keypoints, fundamental, d, img_out);
 
     return 0;
 }
