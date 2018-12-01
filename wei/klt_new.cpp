@@ -138,13 +138,17 @@ void visulize(
     {
         cv::Point2f prev_keypoint = prev_keypoints[i];
         cv::circle(
-            img_out, prev_keypoint, 5, cv::Scalar(0, 0, 255), -1);
+            img_out, prev_keypoint, 5, cv::Scalar(0, 0, 255), -1, CV_AA);
         
         cv::Point2f next_keypoint = next_keypoints[i];
         cv::Point2f next_keypoint_shift = next_keypoint;
         next_keypoint_shift.x += img_out.cols / 2.0;
         cv::circle(
-            img_out, next_keypoint_shift, 5, cv::Scalar(255, 0, 0), -1);
+            img_out, next_keypoint_shift, 5, cv::Scalar(255, 0, 0), -1, CV_AA);
+        
+        // Draw correspondences.
+        cv::line(img_out, prev_keypoint, next_keypoint_shift, 
+            cv::Scalar(0, 255, 255), 1, CV_AA);
 
         // Prepare data.
         cv::Mat epipolar_line;
@@ -178,7 +182,7 @@ void visulize(
         y = -(a * x + c) / b;
         p2 = cv::Point2f(x, y);
 
-        cv::line(img_out, p1, p2, cv::Scalar(255, 255, 255));
+        cv::line(img_out, p1, p2, cv::Scalar(0, 255, 0), 1, CV_AA);
 
         // Right Image ======================================================//
         epipolar_line = fundamental * prev_keypoint_h;
@@ -201,15 +205,24 @@ void visulize(
         x += img_out.cols / 2.0;
         p2 = cv::Point2f(x, y);
 
-        cv::line(img_out, p1, p2, cv::Scalar(255, 255, 255));
+        cv::line(img_out, p1, p2, cv::Scalar(0, 255, 0), 1, CV_AA);
     }
+
+    // Display epipole.
+    // cv::Mat zero = cv::Mat(3, 1, CV_64FC1);
+    // zero.at<double>(0, 0) = 0;
+    // zero.at<double>(1, 0) = 0;
+    // zero.at<double>(2, 0) = 0;
+    // cv::Mat result;
+    // cv::solve(fundamental, zero, result);
+    // std::cout << "Result: " << result << std::endl;
 
     sum /= 2.0;
     cv::imwrite("out.png", img_out);
     cv::imshow("Visual SLAM", img_out);
     std::cout << "Average Error: " << sum / prev_keypoints.size() << "\n";
     std::cout << "Fundamental Matrix: \n" << fundamental << std::endl;
-    cv::waitKey(0);
+    cv::waitKey(1);
 }
 
 int main(int argc, char** argv)
@@ -269,12 +282,9 @@ int main(int argc, char** argv)
         }
     }
 
-    // p Probability that at least one valid set of inliers is chosen.
-    // d Tolerated distance from the model for inliers.
-    // e Assumed outlier percent in data set.
-    double p = 0.99;
-    double d = 1.5f;
-    double e = 0.2;
+    double p = 0.99; // p Probability that at least one valid set is chosen.
+    double d = 1.5f; // d Tolerated distance from the model for inliers.
+    double e = 0.2;  // e Assumed outlier percent in data set.
 
     int niter = static_cast<int>(
         std::ceil(std::log(1.0 - p) / std::log(1.0 - std::pow(1.0 - e, 8))));
@@ -335,12 +345,35 @@ int main(int argc, char** argv)
     std::cout << "Number of Inlier: " << prev_subset.size();
     std::cout << "/" << prev_keypoints.size() << "\n";
 
+    fundamental = cv::findFundamentalMat(prev_keypoints, next_keypoints);
     fundamental = findFundamental(prev_subset, next_subset);
-    // std::cout << fundamental << "\n";
-    fundamental = cv::findFundamentalMat(prev_keypoints, next_keypoints, CV_FM_RANSAC ,1.5f, 0.99);
-
-    // Visualize epipolar lines and distances of fundamental & candidate. 
     visulize(prev_keypoints, next_keypoints, fundamental, d, img_out);
+
+    // OpenCV ===============================================================//
+    fundamental = cv::findFundamentalMat(prev_keypoints, next_keypoints);
+    std::vector<cv::Vec3f> epilines1, epilines2;
+    cv::computeCorrespondEpilines(prev_subset, 1, fundamental, epilines1);
+    cv::computeCorrespondEpilines(next_subset, 2, fundamental, epilines2);
+    for(size_t i = 0; i < epilines1.size(); i++)
+    {
+        cv::Scalar color(255, 255, 255);
+     
+        cv::line(img_out,
+          cv::Point(img_1.cols + 0, 
+            -epilines1[i][2] / epilines1[i][1]),
+          cv::Point(img_1.cols * 2, 
+            -(epilines1[i][2] + epilines1[i][0] * img_1.cols) / 
+            epilines1[i][1]), color, 1, CV_AA);
+     
+        cv::line(img_out,
+          cv::Point(0, -epilines2[i][2] / epilines2[i][1]),
+          cv::Point(img_1.cols, 
+            -(epilines2[i][2] + epilines2[i][0] * img_1.cols) / 
+            epilines2[i][1]), color, 1, CV_AA);
+    }
+    cv::imwrite("out_opencv.png", img_out);
+    cv::imshow("OpenCV Results", img_out);
+    cv::waitKey(0);
 
     return 0;
 }
